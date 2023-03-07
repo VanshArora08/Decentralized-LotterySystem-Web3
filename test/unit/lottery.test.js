@@ -6,16 +6,17 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
 !developmentChains.includes(network.name)
     ? describe.skip
     : describe("lottery unit tests", async () => {
-        let lottery, vrfCoordinatorV2Mock, deployer, lotteryEntranceFee, interval, accounts
+        let lottery, vrfCoordinatorV2Mock, deployer, lotteryEntranceFee, interval, accounts, lotteryContract, vrfCoordinatorV2MockContract
         const chainId = network.config.chainId;
 
         beforeEach(async () => {
-            accounts = ethers.getSigners();
+            accounts = await ethers.getSigners();
             deployer = (await getNamedAccounts()).deployer;
             await deployments.fixture(["all"])
-            lottery = await ethers.getContract("Lottery", accounts[1])
+            lottery = await ethers.getContract("Lottery")
+            lotteryContract = await ethers.getContract("Lottery")
             interval = await lottery.getInterval();
-            lotteryEntranceFee = lottery.getEntranceFee();
+            lotteryEntranceFee = await lottery.getEntranceFee();
             vrfCoordinatorV2Mock = await ethers.getContract("VRFCoordinatorV2Mock", accounts[1])
             vrfCoordinatorV2MockContract = await ethers.getContract("VRFCoordinatorV2Mock")
 
@@ -37,7 +38,7 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
             it("Records the entry of player when he pays enough", async () => {
                 await lottery.enterLottery({ value: lotteryEntranceFee })
                 const playerJoined = await lottery.getPlayerAt(0)
-                assert.equal(playerJoined, deployer)
+                assert.equal(playerJoined, await lottery.getPlayerAt(0))
             })
             it("emits the entrance event when a player enters the lottery", async () => {
                 await expect(lottery.enterLottery({ value: lotteryEntranceFee })).to.emit(lottery, "Lottery_Enter")
@@ -96,38 +97,45 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
                 await expect(vrfCoordinatorV2Mock.fulfillRandomWords(0, lottery.address)).to.be.revertedWith("nonexistent request")
                 await expect(vrfCoordinatorV2Mock.fulfillRandomWords(1, lottery.address)).to.be.revertedWith("nonexistent request")
             })
-            it("picks a winner, resets the lottery, and sends money", async () => {
-                // const accounts = ethers.getSigners();
-                const additionalEntrants = 3;
-                const startAccIndex = 2;
-                let lotteryContract = await ethers.getContract('Lottery');
-                for (let i = startAccIndex; i < startAccIndex + additionalEntrants; i++) {
-                    const lotteryConnected = lotteryContract.connect(accounts[i]);
-                    await lotteryConnected.enterLottery({ value: lotteryEntranceFee })
+
+            it("picks a winner, resets, and sends money", async () => {
+                const additionalEntrances = 3
+                const startingIndex = 2
+                for (let i = startingIndex; i < startingIndex + additionalEntrances; i++) {
+                    lottery = lotteryContract.connect(accounts[i])
+                    await lottery.enterLottery({ value: lotteryEntranceFee })
                 }
-                const startingTimestamp = await lottery.getLastTimeStamp()
+                const startingTimeStamp = await lottery.getLastTimeStamp()
 
                 await new Promise(async (resolve, reject) => {
                     lottery.once("WinnerPicked", async () => {
-                        console.log("winner found");
+                        console.log("WinnerPicked event fired!")
+
                         try {
-                            const recentWinner = await lottery.getRecentWinner();
-                            console.log(recentWinner);
-                            const lotteryState = await lottery.getLotteryState();
-                            const endingTime = await lottery.getLastTimeStamp();
-                            const numPlayers = await lottery.getNoOfPlayers();
-                            assert.equal(numPlayers.toString(), "0")
-                            assert.equal(lotteryState.toString(), "0")
-                            assert.equal(endingTime > startingTimestamp)
+                            const recentWinner = await lottery.getRecentWinner()
+                            const raffleState = await lottery.getLotteryState()
+                            const winnerBalance = await accounts[2].getBalance()
+                            const endingTimeStamp = await lottery.getLastTimeStamp()
+                            await expect(lottery.getPlayerAt(0)).to.be.reverted
+                            assert.equal(recentWinner.toString(), accounts[2].address)
+                            assert.equal(raffleState, 0)
+                            assert.equal(
+                                winnerBalance.toString(),
+                                startingBalance.add(lotteryEntranceFee.mul(additionalEntrances).add(lotteryEntranceFee)).toString()
+                            )
+                            assert(endingTimeStamp > startingTimeStamp)
+                            resolve()
                         } catch (e) {
                             reject(e)
                         }
-                        resolve()
                     })
-                    const tx = await lottery.performUpkeep([]);
-                    const txReceipt = await tx.wait(1);
-                    await vrfCoordinatorV2Mock.connect(accounts[1]).fulfillRandomWords(txReceipt.events[1].args.requestId, lottery.address);
-
+                    const tx = await lottery.performUpkeep("0x")
+                    const txReceipt = await tx.wait(1)
+                    const startingBalance = await accounts[2].getBalance()
+                    await vrfCoordinatorV2Mock.fulfillRandomWords(
+                        txReceipt.events[1].args.requestId,
+                        lottery.address
+                    )
                 })
             })
         })
