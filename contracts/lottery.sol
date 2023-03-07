@@ -38,6 +38,7 @@ contract Lottery is VRFConsumerBaseV2, KeeperCompatibleInterface {
     //events
     event Lottery_Enter(address indexed player);
     event RequestedLotteryWinner(uint256 requestId);
+    event WinnerPicked(address indexed player);
 
     //constructor
     constructor(
@@ -132,6 +133,7 @@ contract Lottery is VRFConsumerBaseV2, KeeperCompatibleInterface {
         if (!success) {
             revert lottery__TransactionFailed();
         }
+        emit WinnerPicked(winner);
     }
 
     //getter functions

@@ -84,5 +84,30 @@ const { developmentChains, networkConfig } = require("../../helper-hardhat-confi
                 assert(upkeepNeeded)
             })
         })
+        describe("fulfillRandomWords", () => {
+            beforeEach(async () => {
+                await lottery.enterLottery({ value: lotteryEntranceFee });
+                await network.provider.send("evm_increaseTime", [interval.toNumber() + 1]);
+                await network.provider.send("evm_mine", []);
+            })
+            it("can Only be called after performUpkeep", async () => {
+                await expect(vrfCoordinatorV2Mock.fulfillRandomWords(0, lottery.address)).to.be.revertedWith("nonexistent request")
+                await expect(vrfCoordinatorV2Mock.fulfillRandomWords(1, lottery.address)).to.be.revertedWith("nonexistent request")
+            })
+            it("picks a winner, resets the lottery, and sends money", async () => {
+                const accounts = ethers.getSigners();
+                const additionalEntrants = 3;
+                const startAccIndex = 1;
+                for (let i = startAccIndex; i < startAccIndex + additionalEntrants; i++) {
+                    const accConnedted = lottery.connect(accounts[i]);
+                    await accConnedted.enterLottery({ value: lotteryEntranceFee })
+                }
+                const startingTimestamp = await lottery.getLastTimeStamp()
+
+                await new Promise(async (res, rej) => {
+                    lottery.once("WinnerPicked")
+                })
+            })
+        })
 
     })
